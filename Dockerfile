@@ -16,7 +16,28 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Stage 2: Runtime
+# Stage 2: Test (optional stage for CI/CD)
+FROM builder AS test
+
+WORKDIR /app
+
+# Install test dependencies
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir --user -r requirements-dev.txt
+
+# Copy application code and tests
+COPY src/ /app/src/
+COPY tests/ /app/tests/
+
+# Set dummy env vars for tests
+ENV INSTAGRAM_USERNAME=test_user
+ENV INSTAGRAM_PASSWORD=test_pass
+ENV PATH=/root/.local/bin:$PATH
+
+# Run tests
+RUN pytest tests/ -v --cov=src --cov-report=term-missing
+
+# Stage 3: Runtime
 FROM python:3.11-slim
 
 # Install runtime dependencies
