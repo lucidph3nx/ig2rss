@@ -22,7 +22,7 @@ FROM builder AS test
 WORKDIR /app
 
 # Install test dependencies
-COPY requirements-dev.txt .
+COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir --user -r requirements-dev.txt
 
 # Copy application code and tests
@@ -33,6 +33,7 @@ COPY tests/ /app/tests/
 ENV INSTAGRAM_USERNAME=test_user
 ENV INSTAGRAM_PASSWORD=test_pass
 ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONPATH=/app
 
 # Run tests
 RUN pytest tests/ -v --cov=src --cov-report=term-missing

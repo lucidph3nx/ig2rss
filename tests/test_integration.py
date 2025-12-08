@@ -38,39 +38,49 @@ def mock_instagram_client():
 
 def test_fetch_and_store_posts(mock_instagram_client, temp_storage):
     """Integration test: fetch posts from Instagram and store them."""
-    # Mock the timeline feed response
+    # Mock the timeline feed response structure
     mock_media = Mock()
-    mock_media.id = "1234567890"
+    mock_media.pk = "1234567890"
     mock_media.media_type = 1  # Photo
     mock_media.taken_at = datetime(2024, 1, 15, 12, 0, 0)
     mock_media.caption_text = "Test post from Instagram"
     mock_media.code = "ABC123"
     mock_media.thumbnail_url = "https://example.com/image.jpg"
+    mock_media.user = Mock()
     mock_media.user.username = "test_user"
     mock_media.user.full_name = "Test User"
     
+    # Create proper feed response structure
+    feed_response = {
+        "feed_items": [
+            {"media_or_ad": {"pk": "1234567890"}}
+        ]
+    }
+    
     with patch.object(mock_instagram_client, "client") as mock_client:
-        mock_client.get_timeline_feed.return_value = [mock_media]
+        mock_client.get_timeline_feed.return_value = feed_response
         
-        # Fetch posts from Instagram
-        posts = mock_instagram_client.get_timeline_feed(count=10)
-        
-        assert len(posts) == 1
-        assert posts[0].id == "1234567890"
-        
-        # Store the post in database
-        result = temp_storage.save_post(posts[0])
-        assert result is True
-        
-        # Verify the post was stored
-        assert temp_storage.post_exists(posts[0].id) is True
-        
-        # Retrieve the post from storage
-        stored_post = temp_storage.get_post_by_id(posts[0].id)
-        assert stored_post is not None
-        assert stored_post['caption'] == "Test post from Instagram"
-        assert stored_post['author_username'] == "test_user"
-        assert len(stored_post['media']) == 1
+        # Mock extract_media_v1 to return our mock_media
+        with patch("src.instagram_client.extract_media_v1", return_value=mock_media):
+            # Fetch posts from Instagram
+            posts = mock_instagram_client.get_timeline_feed(count=10)
+            
+            assert len(posts) == 1
+            assert posts[0].id == "1234567890"
+            
+            # Store the post in database
+            result = temp_storage.save_post(posts[0])
+            assert result is True
+            
+            # Verify the post was stored
+            assert temp_storage.post_exists(posts[0].id) is True
+            
+            # Retrieve the post from storage
+            stored_post = temp_storage.get_post_by_id(posts[0].id)
+            assert stored_post is not None
+            assert stored_post['caption'] == "Test post from Instagram"
+            assert stored_post['author_username'] == "test_user"
+            assert len(stored_post['media']) == 1
 
 
 def test_fetch_store_and_download_media(mock_instagram_client, temp_storage):

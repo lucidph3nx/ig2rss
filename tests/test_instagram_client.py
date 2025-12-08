@@ -18,6 +18,20 @@ from instagrapi.exceptions import (
 )
 
 
+def create_feed_response(media_list):
+    """Helper to create a properly structured feed response.
+    
+    The Instagram API returns a dict with 'feed_items', where each item
+    has a 'media_or_ad' field containing the media data.
+    """
+    feed_items = []
+    for media in media_list:
+        feed_items.append({
+            "media_or_ad": media
+        })
+    return {"feed_items": feed_items}
+
+
 @pytest.fixture
 def mock_client():
     """Create a mock instagrapi Client."""
@@ -36,7 +50,7 @@ def instagram_client(mock_client):
 def mock_media_photo():
     """Create a mock photo media object from Instagram."""
     media = Mock()
-    media.id = "12345678901234567"
+    media.pk = "12345678901234567"
     media.media_type = 1  # Photo
     media.taken_at = datetime(2024, 1, 15, 12, 0, 0)
     media.caption_text = "Test photo caption"
@@ -52,7 +66,7 @@ def mock_media_photo():
 def mock_media_video():
     """Create a mock video media object from Instagram."""
     media = Mock()
-    media.id = "98765432109876543"
+    media.pk = "98765432109876543"
     media.media_type = 2  # Video
     media.taken_at = datetime(2024, 1, 16, 14, 30, 0)
     media.caption_text = "Test video caption"
@@ -69,7 +83,7 @@ def mock_media_video():
 def mock_media_carousel():
     """Create a mock carousel media object from Instagram."""
     media = Mock()
-    media.id = "11111111111111111"
+    media.pk = "11111111111111111"
     media.media_type = 8  # Carousel
     media.taken_at = datetime(2024, 1, 17, 10, 0, 0)
     media.caption_text = "Test carousel"
@@ -165,9 +179,14 @@ class TestInstagramClientGetTimelineFeed:
     def test_get_timeline_feed_success(self, instagram_client, mock_media_photo):
         """Test successful feed fetch."""
         instagram_client._is_authenticated = True
-        instagram_client.client.get_timeline_feed = Mock(return_value=[mock_media_photo])
         
-        posts = instagram_client.get_timeline_feed(count=1)
+        # Mock the feed response structure
+        feed_response = create_feed_response([{"pk": "12345678901234567"}])
+        instagram_client.client.get_timeline_feed = Mock(return_value=feed_response)
+        
+        # Mock extract_media_v1 to return our mock_media_photo
+        with patch("src.instagram_client.extract_media_v1", return_value=mock_media_photo):
+            posts = instagram_client.get_timeline_feed(count=1)
         
         assert len(posts) == 1
         assert posts[0].id == "12345678901234567"
@@ -179,11 +198,22 @@ class TestInstagramClientGetTimelineFeed:
     ):
         """Test fetching multiple posts."""
         instagram_client._is_authenticated = True
-        instagram_client.client.get_timeline_feed = Mock(
-            return_value=[mock_media_photo, mock_media_video]
-        )
         
-        posts = instagram_client.get_timeline_feed(count=2)
+        # Mock the feed response structure
+        feed_response = create_feed_response([
+            {"pk": "12345678901234567"},
+            {"pk": "98765432109876543"}
+        ])
+        instagram_client.client.get_timeline_feed = Mock(return_value=feed_response)
+        
+        # Mock extract_media_v1 to return the appropriate mock based on pk
+        def extract_side_effect(data):
+            if data["pk"] == "12345678901234567":
+                return mock_media_photo
+            return mock_media_video
+        
+        with patch("src.instagram_client.extract_media_v1", side_effect=extract_side_effect):
+            posts = instagram_client.get_timeline_feed(count=2)
         
         assert len(posts) == 2
         assert posts[0].post_type == "photo"
@@ -194,12 +224,13 @@ class TestInstagramClientGetTimelineFeed:
     ):
         """Test that count parameter limits returned posts."""
         instagram_client._is_authenticated = True
-        # Return 5 posts but request only 3
-        instagram_client.client.get_timeline_feed = Mock(
-            return_value=[mock_media_photo] * 5
-        )
         
-        posts = instagram_client.get_timeline_feed(count=3)
+        # Return 5 posts but request only 3
+        feed_response = create_feed_response([{"pk": str(i)} for i in range(5)])
+        instagram_client.client.get_timeline_feed = Mock(return_value=feed_response)
+        
+        with patch("src.instagram_client.extract_media_v1", return_value=mock_media_photo):
+            posts = instagram_client.get_timeline_feed(count=3)
         
         assert len(posts) == 3
     
@@ -209,16 +240,21 @@ class TestInstagramClientGetTimelineFeed:
         """Test that posts with conversion errors are skipped."""
         instagram_client._is_authenticated = True
         
-        # Create a bad media object that will fail conversion
-        bad_media = Mock()
-        bad_media.id = "bad"
-        bad_media.media_type = 999  # Unknown type
+        # Create feed with good and bad media
+        feed_response = create_feed_response([
+            {"pk": "12345678901234567"},
+            {"pk": "bad"}
+        ])
+        instagram_client.client.get_timeline_feed = Mock(return_value=feed_response)
         
-        instagram_client.client.get_timeline_feed = Mock(
-            return_value=[mock_media_photo, bad_media]
-        )
+        # First returns good media, second raises exception
+        def extract_side_effect(data):
+            if data["pk"] == "12345678901234567":
+                return mock_media_photo
+            raise Exception("Conversion failed")
         
-        posts = instagram_client.get_timeline_feed(count=2)
+        with patch("src.instagram_client.extract_media_v1", side_effect=extract_side_effect):
+            posts = instagram_client.get_timeline_feed(count=2)
         
         # Should only return the valid post
         assert len(posts) == 1
@@ -232,12 +268,13 @@ class TestInstagramClientRetryLogic:
         """Test retry logic on rate limiting."""
         instagram_client._is_authenticated = True
         
-        # Fail twice with rate limit, then succeed
+        # Fail twice with rate limit, then succeed with empty feed
+        empty_feed = {"feed_items": []}
         instagram_client.client.get_timeline_feed = Mock(
             side_effect=[
                 PleaseWaitFewMinutes("Rate limited"),
                 PleaseWaitFewMinutes("Rate limited"),
-                [],
+                empty_feed,
             ]
         )
         
@@ -251,9 +288,10 @@ class TestInstagramClientRetryLogic:
         """Test retry logic on ClientError."""
         instagram_client._is_authenticated = True
         
-        # Fail once, then succeed
+        # Fail once, then succeed with empty feed
+        empty_feed = {"feed_items": []}
         instagram_client.client.get_timeline_feed = Mock(
-            side_effect=[ClientError("Network error"), []]
+            side_effect=[ClientError("Network error"), empty_feed]
         )
         
         with patch("time.sleep"):

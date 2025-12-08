@@ -48,13 +48,9 @@ data/
 *.log
 *.db
 
-# Test files
-tests/
+# Test helper scripts (not needed in container)
 test-local.sh
 inspect-feed.sh
-
-# Development requirements
-requirements-dev.txt
 
 # Kubernetes
 k8s/
