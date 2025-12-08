@@ -94,8 +94,10 @@ class RSSGenerator:
         """
         item = ET.SubElement(channel, 'item')
         
-        # Title - use first line of caption or fallback
-        title = self._extract_title(post.get('caption', ''))
+        # Title - prefix with author name, then use first line of caption or fallback
+        author_name = post.get('author_full_name') or post['author_username']
+        title_content = self._extract_title(post.get('caption', ''))
+        title = f"{author_name}: {title_content}"
         ET.SubElement(item, 'title').text = title
         
         # Link - permalink to Instagram post
