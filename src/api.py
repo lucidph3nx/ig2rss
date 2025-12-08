@@ -229,14 +229,16 @@ def init_scheduler(app: Flask, config: Type[Config]) -> BackgroundScheduler:
                 # Fetch recent posts
                 posts = client.get_timeline_feed(count=config.FETCH_COUNT)
                 
-                logger.info(f"Fetched {len(posts)} posts from Instagram")
+                logger.info(f"📥 Fetched {len(posts)} posts from Instagram (after ad filtering)")
                 
                 # Save posts
                 new_count = 0
+                duplicate_count = 0
                 for post in posts:
                     if not storage.post_exists(post.id):
                         if storage.save_post(post):
                             new_count += 1
+                            logger.info(f"💾 SAVED NEW POST from @{post.author_username} (id: {post.id})")
                             
                             # Download media
                             for idx, (media_url, media_type) in enumerate(zip(post.media_urls, post.media_types)):
@@ -262,8 +264,11 @@ def init_scheduler(app: Flask, config: Type[Config]) -> BackgroundScheduler:
                                     time.sleep(0.5)
                                 except Exception as e:
                                     logger.error(f"Failed to download media {media_url}: {e}")
+                    else:
+                        duplicate_count += 1
+                        logger.info(f"⏭️  DUPLICATE (already in DB) from @{post.author_username} (id: {post.id})")
                 
-                logger.info(f"Background sync complete: {new_count} new posts saved")
+                logger.info(f"Background sync complete: {new_count} new posts saved, {duplicate_count} duplicates skipped")
                 
             except Exception as e:
                 logger.error(f"Background sync failed: {e}", exc_info=True)

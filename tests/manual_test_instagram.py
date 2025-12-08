@@ -22,8 +22,9 @@ from src.instagram_client import InstagramClient
 from src.config import Config
 
 # Set up logging
+log_level = os.getenv("LOG_LEVEL", "INFO")
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -49,10 +50,11 @@ def main():
     logger.info(f"Testing with username: {username}")
     
     try:
-        # Initialize client
+        # Initialize client with session file
         logger.info("\n[1/3] Initializing Instagram client...")
-        client = InstagramClient(username, password)
-        logger.info("✓ Client initialized")
+        session_file = os.getenv("SESSION_FILE", "./data/instagram_session.json")
+        client = InstagramClient(username, password, session_file=session_file)
+        logger.info(f"✓ Client initialized (session_file: {session_file})")
         
         # Test login
         logger.info("\n[2/3] Testing login...")
@@ -65,8 +67,9 @@ def main():
         
         # Test fetching timeline feed
         logger.info("\n[3/3] Testing timeline feed fetch...")
-        logger.info("Fetching up to 10 posts from your home feed...")
-        posts = client.get_timeline_feed(count=10)
+        fetch_count = int(os.getenv("FETCH_COUNT", "20"))
+        logger.info(f"Fetching up to {fetch_count} posts from your home feed...")
+        posts = client.get_timeline_feed(count=fetch_count)
         
         logger.info(f"✓ Successfully fetched {len(posts)} posts\n")
         

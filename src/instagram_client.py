@@ -227,6 +227,10 @@ class InstagramClient:
                     break
                 
                 # Process items from this page
+                page_posts_added = 0
+                page_items_total = len(items)
+                page_ads_skipped = 0
+                
                 for item in items:
                     if len(posts) >= count:
                         break
@@ -235,12 +239,15 @@ class InstagramClient:
                         # Each item may have a 'media_or_ad' field with the actual media
                         media_data = item.get("media_or_ad")
                         if not media_data:
+                            logger.debug("Item has no media_or_ad field, skipping")
                             continue
                         
                         # Skip ads - check for ad indicators in the media data
                         # Instagram API includes fields like 'is_paid_partnership' or 'dr_ad_type'
                         if media_data.get("dr_ad_type") or media_data.get("is_paid_partnership"):
-                            logger.debug(f"Skipping ad: {media_data.get('id', 'unknown')}")
+                            page_ads_skipped += 1
+                            ad_username = media_data.get("user", {}).get("username", "unknown")
+                            logger.info(f"🚫 SKIPPED AD from @{ad_username} (id: {media_data.get('id', 'unknown')})")
                             continue
                         
                         # Fix Pydantic validation issues with clips_metadata
@@ -258,9 +265,16 @@ class InstagramClient:
                         post = self._convert_media_to_post(media)
                         if post:
                             posts.append(post)
+                            page_posts_added += 1
+                            logger.info(f"✅ FETCHED POST from @{post.author_username} (id: {post.id})")
                     except Exception as e:
                         logger.warning(f"Failed to convert media item: {e}")
                         continue
+                
+                logger.info(
+                    f"Page {page_count}: {page_posts_added} posts fetched, {page_ads_skipped} ads skipped "
+                    f"(processed {page_items_total} items total)"
+                )
                 
                 # Get next page cursor
                 next_max_id = timeline_response.get("next_max_id")
@@ -277,7 +291,7 @@ class InstagramClient:
             return posts
         
         posts = self._retry_with_backoff(_fetch)
-        logger.info(f"Successfully fetched {len(posts)} posts from timeline")
+        logger.info(f"📊 FETCH COMPLETE: {len(posts)} total posts fetched from timeline")
         return posts
     
     def _convert_media_to_post(self, media) -> Optional[InstagramPost]:
