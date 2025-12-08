@@ -188,7 +188,8 @@ class InstagramClient:
         """Fetch recent posts from user's home feed (timeline).
         
         This fetches posts from all accounts that the authenticated user follows,
-        similar to the Instagram home feed.
+        similar to the Instagram home feed. Automatically handles pagination to
+        fetch the requested number of posts.
         
         Args:
             count: Maximum number of posts to fetch (default 50)
@@ -207,45 +208,72 @@ class InstagramClient:
         logger.info(f"Fetching timeline feed (count={count})")
         
         def _fetch():
-            # Use instagrapi's get_timeline_feed method
-            # This returns a dict with 'feed_items' containing the media
-            timeline_response = self.client.get_timeline_feed()
-            
             posts = []
-            items = timeline_response.get("feed_items", [])
+            max_id = None
+            page_count = 0
+            max_pages = 10  # Safety limit to prevent infinite loops
             
-            for item in items[:count]:
-                try:
-                    # Each item may have a 'media_or_ad' field with the actual media
-                    media_data = item.get("media_or_ad")
-                    if not media_data:
+            # Keep fetching pages until we have enough posts or no more pages
+            while len(posts) < count and page_count < max_pages:
+                page_count += 1
+                
+                # Fetch next page of timeline
+                logger.debug(f"Fetching timeline page {page_count} (max_id={max_id})")
+                timeline_response = self.client.get_timeline_feed(max_id=max_id)
+                
+                items = timeline_response.get("feed_items", [])
+                if not items:
+                    logger.debug("No more feed items available")
+                    break
+                
+                # Process items from this page
+                for item in items:
+                    if len(posts) >= count:
+                        break
+                    
+                    try:
+                        # Each item may have a 'media_or_ad' field with the actual media
+                        media_data = item.get("media_or_ad")
+                        if not media_data:
+                            continue
+                        
+                        # Skip ads - check for ad indicators in the media data
+                        # Instagram API includes fields like 'is_paid_partnership' or 'dr_ad_type'
+                        if media_data.get("dr_ad_type") or media_data.get("is_paid_partnership"):
+                            logger.debug(f"Skipping ad: {media_data.get('id', 'unknown')}")
+                            continue
+                        
+                        # Fix Pydantic validation issues with clips_metadata
+                        # The audio_filter_infos field should be a list but sometimes comes as None
+                        if "clips_metadata" in media_data:
+                            clips = media_data.get("clips_metadata", {})
+                            if isinstance(clips, dict) and "original_sound_info" in clips:
+                                sound_info = clips.get("original_sound_info", {})
+                                if isinstance(sound_info, dict) and sound_info.get("audio_filter_infos") is None:
+                                    sound_info["audio_filter_infos"] = []
+                        
+                        # Use instagrapi's extractor to convert to Media object
+                        media = extract_media_v1(media_data)
+                        
+                        post = self._convert_media_to_post(media)
+                        if post:
+                            posts.append(post)
+                    except Exception as e:
+                        logger.warning(f"Failed to convert media item: {e}")
                         continue
-                    
-                    # Skip ads - check for ad indicators in the media data
-                    # Instagram API includes fields like 'is_paid_partnership' or 'dr_ad_type'
-                    if media_data.get("dr_ad_type") or media_data.get("is_paid_partnership"):
-                        logger.info(f"Skipping ad: {media_data.get('id', 'unknown')}")
-                        continue
-                    
-                    # Fix Pydantic validation issues with clips_metadata
-                    # The audio_filter_infos field should be a list but sometimes comes as None
-                    if "clips_metadata" in media_data:
-                        clips = media_data.get("clips_metadata", {})
-                        if isinstance(clips, dict) and "original_sound_info" in clips:
-                            sound_info = clips.get("original_sound_info", {})
-                            if isinstance(sound_info, dict) and sound_info.get("audio_filter_infos") is None:
-                                sound_info["audio_filter_infos"] = []
-                    
-                    # Use instagrapi's extractor to convert to Media object
-                    media = extract_media_v1(media_data)
-                    
-                    post = self._convert_media_to_post(media)
-                    if post:
-                        posts.append(post)
-                except Exception as e:
-                    logger.warning(f"Failed to convert media item: {e}")
-                    continue
+                
+                # Get next page cursor
+                next_max_id = timeline_response.get("next_max_id")
+                if not next_max_id or next_max_id == max_id:
+                    logger.debug("No more pages available (no next_max_id)")
+                    break
+                
+                max_id = next_max_id
+                
+                # Add small delay between pages to avoid rate limiting
+                time.sleep(1)
             
+            logger.debug(f"Fetched {len(posts)} posts across {page_count} pages")
             return posts
         
         posts = self._retry_with_backoff(_fetch)
