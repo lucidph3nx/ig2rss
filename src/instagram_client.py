@@ -303,12 +303,38 @@ class InstagramClient:
                             logger.debug("Item has no media_or_ad field, skipping")
                             continue
                         
+                        # Debug: Log all available fields for troubleshooting
+                        item_keys = list(item.keys())
+                        media_keys = list(media_data.keys())
+                        logger.debug(f"Item keys: {item_keys}")
+                        logger.debug(f"Media data keys: {media_keys}")
+                        
                         # Skip ads - check for ad indicators in the media data
-                        # Instagram API includes fields like 'is_paid_partnership' or 'dr_ad_type'
-                        if media_data.get("dr_ad_type") or media_data.get("is_paid_partnership"):
+                        # Instagram has many different ad indicators we need to check
+                        is_ad = (
+                            media_data.get("dr_ad_type") or
+                            media_data.get("is_paid_partnership") or
+                            media_data.get("injected") or
+                            media_data.get("ad_action") or
+                            media_data.get("ad_id") or
+                            media_data.get("ad_header_style") or
+                            media_data.get("is_sponsored") or
+                            # Check if item itself has injected flag
+                            item.get("injected")
+                        )
+                        
+                        if is_ad:
                             page_ads_skipped += 1
                             ad_username = media_data.get("user", {}).get("username", "unknown")
-                            logger.info(f"🚫 SKIPPED AD from @{ad_username} (id: {media_data.get('id', 'unknown')})")
+                            ad_type = (
+                                media_data.get("dr_ad_type") or
+                                "injected" if (media_data.get("injected") or item.get("injected")) else
+                                "sponsored" if media_data.get("is_sponsored") else
+                                "partnership" if media_data.get("is_paid_partnership") else
+                                "ad_action" if media_data.get("ad_action") else
+                                "unknown"
+                            )
+                            logger.info(f"🚫 SKIPPED AD (type: {ad_type}) from @{ad_username} (id: {media_data.get('id', 'unknown')})")
                             continue
                         
                         # Fix Pydantic validation issues with clips_metadata
@@ -319,6 +345,17 @@ class InstagramClient:
                                 sound_info = clips.get("original_sound_info", {})
                                 if isinstance(sound_info, dict) and sound_info.get("audio_filter_infos") is None:
                                     sound_info["audio_filter_infos"] = []
+                        
+                        # Fix Pydantic validation issues with image_versions2
+                        # The scans_profile field should be a string but sometimes comes as None
+                        if "image_versions2" in media_data:
+                            image_versions = media_data.get("image_versions2", {})
+                            if isinstance(image_versions, dict) and "candidates" in image_versions:
+                                candidates = image_versions.get("candidates", [])
+                                if isinstance(candidates, list):
+                                    for candidate in candidates:
+                                        if isinstance(candidate, dict) and candidate.get("scans_profile") is None:
+                                            candidate["scans_profile"] = ""
                         
                         # Use instagrapi's extractor to convert to Media object
                         media = extract_media_v1(media_data)
