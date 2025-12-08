@@ -35,8 +35,10 @@ jobs:
           context: .
           push: false
           target: test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          cache-from: type=gha,scope=test
+          cache-to: type=gha,mode=max,scope=test
+          platforms: linux/amd64
       
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -67,6 +69,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=prod
+            type=gha,scope=test
+          cache-to: type=gha,mode=max,scope=prod
           platforms: linux/amd64,linux/arm64
