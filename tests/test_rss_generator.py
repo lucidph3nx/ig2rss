@@ -109,7 +109,7 @@ class TestRSSGenerator:
         
         # Check item content
         item = items[0]
-        assert item.find('title').text == "Test caption"
+        assert item.find('title').text == "Test User: Test caption"
         assert item.find('link').text == "https://instagram.com/p/test123"
         assert item.find('guid').text == "12345"
         assert item.find('guid').attrib['isPermaLink'] == "false"

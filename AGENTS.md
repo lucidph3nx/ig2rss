@@ -1,5 +1,8 @@
 # Agent Guidelines for ig2rss
 
+## Workflow
+- **ALWAYS run tests before committing**: Run `pytest tests/ -v` to ensure all tests pass before making any commits. The Docker build includes a test stage that will fail if tests don't pass.
+
 ## Commands
 - **Test all**: `pytest tests/ -v --cov=src --cov-report=term-missing`
 - **Test single**: `pytest tests/test_<module>.py::<TestClass>::<test_name> -v`
